@@ -1,9 +1,9 @@
 .{
     .name = .zmake,
     .fingerprint = 0x4ec8a6012a1e8ff7,
-    .version = "0.1.0",
+    .version = "0.1.1",
     .dependencies = .{},
-    .minimum_zig_version = "0.15.2",
+    .minimum_zig_version = "0.16.0",
     .paths = .{
         "src",
         "build.zig",

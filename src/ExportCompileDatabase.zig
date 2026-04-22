@@ -55,7 +55,7 @@ fn make(step: *Step, _: Step.MakeOptions) !void {
     const self: *ExportCompileDatabase = @fieldParentPtr("step", step);
     // TODO 检查 build.zig 是否有修改
 
-    try Step.handleVerbose(b, null, &.{ "export", self.artifact.name, self.dest_rel_path });
+    try Step.handleVerbose(b, .inherit, &.{ "export", self.artifact.name, self.dest_rel_path });
 
     var gpa = std.heap.DebugAllocator(.{}){};
     defer {
@@ -74,9 +74,9 @@ fn make(step: *Step, _: Step.MakeOptions) !void {
     if (self.options.debug) {
         std.debug.print("\n{s}\n", .{content});
     }
-    const file = try b.build_root.handle.createFile(self.dest_rel_path, .{});
-    defer file.close();
-    _ = try file.write(content);
+    const file = try b.build_root.handle.createFile(b.graph.io, self.dest_rel_path, .{});
+    defer file.close(b.graph.io);
+    _ = try file.writeStreamingAll(b.graph.io, content);
 }
 
 fn makeExport(
@@ -116,7 +116,7 @@ fn makeExport(
             _set.deinit();
         }
     }
-    return convert(allocator, info, set, options);
+    return convert(b, allocator, info, set, options);
 }
 
 pub const Options = struct {
@@ -129,7 +129,7 @@ pub const Options = struct {
     debug: bool = false,
 };
 
-fn convert(allocator: Allocator, info: CompileInfo, deps: ?std.BufSet, options: Options) !CompileCommandsJson {
+fn convert(b: *std.Build, allocator: Allocator, info: CompileInfo, deps: ?std.BufSet, options: Options) !CompileCommandsJson {
     var json = try CompileCommandsJson.init(allocator);
     var arguments = try std.ArrayList(CompileCommandsJson.Argument).initCapacity(allocator, 16);
     defer arguments.deinit(allocator);
@@ -140,7 +140,7 @@ fn convert(allocator: Allocator, info: CompileInfo, deps: ?std.BufSet, options: 
     try arguments.append(allocator, .{ .arg = info.triple });
     try arguments.append(allocator, .{ .c_macro_undef = if (info.native) null else "__STDC_HOSTED__" });
 
-    const zig_lib_path = try getZigLib(allocator, options.zig_lib_path);
+    const zig_lib_path = try getZigLib(b, allocator, options.zig_lib_path);
     defer allocator.free(zig_lib_path);
     var hosted = try StringHostedArray.init(allocator);
     defer hosted.deinit(allocator);
@@ -206,7 +206,7 @@ fn convert(allocator: Allocator, info: CompileInfo, deps: ?std.BufSet, options: 
                 break :blk false;
             };
             if (include_current_dependency) {
-                var j = try convert(allocator, dep_info, deps, options);
+                var j = try convert(b, allocator, dep_info, deps, options);
                 defer j.deinit(allocator);
                 try json.mergeMove(allocator, &j);
             }
@@ -249,14 +249,12 @@ const StringHostedArray = struct {
 };
 
 
-fn getZigLib(allocator: Allocator, zig_lib_path: ?[]const u8) ![]const u8 {
+fn getZigLib(b: *std.Build, allocator: Allocator, zig_lib_path: ?[]const u8) ![]const u8 {
     const _zig_lib_path = blk: {
         if (zig_lib_path) |v| {
             break :blk try allocator.dupe(u8, v);
         } else {
-            var env_map = try std.process.getEnvMap(allocator);
-            defer env_map.deinit();
-            break :blk try allocator.dupe(u8, env_map.get("ZIG_LIB_DIR").?);
+            break :blk try allocator.dupe(u8, b.graph.environ_map.get("ZIG_LIB_DIR").?);
         }
     };
     for (_zig_lib_path) |*byte| {
